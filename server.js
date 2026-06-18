@@ -55,6 +55,7 @@ let connState = "starting"; // starting | qr | open | close
 let lastConnectedAt = null;
 let meNumber = null;
 let lastSendAt = 0;
+const msgStore = new Map(); // cache de mensagens enviadas (p/ reenvio quando não descriptografa)
 
 // ---- Helpers de telefone ----------------------------------------------------
 function digits(s) { return String(s || "").replace(/\D/g, ""); }
@@ -140,6 +141,12 @@ async function startSocket() {
     connectTimeoutMs: 60000,
     keepAliveIntervalMs: 25000,
     retryRequestDelayMs: 2000,
+    getMessage: async (key) => {
+      // permite ao Baileys REENVIAR uma mensagem que o destinatário não
+      // conseguiu descriptografar (corrige o "Aguardando mensagem" no WhatsApp).
+      const m = msgStore.get(key.id);
+      return m ? m : undefined;
+    },
   });
 
   sock.ev.on("creds.update", saveCreds);
@@ -244,6 +251,11 @@ async function sendText(phone, text) {
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   const sent = await sock.sendMessage(jid, { text });
   lastSendAt = Date.now();
+  // guarda a mensagem p/ o getMessage poder reenviar se o destino não descriptografar
+  if (sent && sent.key && sent.key.id) {
+    msgStore.set(sent.key.id, sent.message);
+    if (msgStore.size > 400) { const k = msgStore.keys().next().value; msgStore.delete(k); }
+  }
   return sent?.key?.id || null;
 }
 
