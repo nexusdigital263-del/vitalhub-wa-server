@@ -138,6 +138,8 @@ async function startSocket() {
     markOnlineOnConnect: false,
     syncFullHistory: false,
     connectTimeoutMs: 60000,
+    keepAliveIntervalMs: 25000,
+    retryRequestDelayMs: 2000,
   });
 
   sock.ev.on("creds.update", saveCreds);
@@ -160,15 +162,20 @@ async function startSocket() {
       connState = "close";
       const code = new Boom(lastDisconnect?.error)?.output?.statusCode;
       const loggedOut = code === DisconnectReason.loggedOut;
-      const badSession = code === DisconnectReason.badSession || code === 500;
-      log.warn(`conexão fechada (code ${code}) — ${loggedOut ? "deslogado" : badSession ? "sessão inválida, limpando…" : "reconectando…"}`);
+      const badSession = code === DisconnectReason.badSession;
+      const conflict = code === DisconnectReason.connectionReplaced || code === 440;
+      log.warn(`conexão fechada (code ${code}) — ${loggedOut ? "deslogado" : badSession ? "sessão inválida, limpando…" : conflict ? "conexão substituída (aberto em outro lugar)" : "reconectando…"}`);
       qrDataUrl = null;
-      // sessão inválida ou logout: apaga os creds e recomeça do zero (gera QR novo)
+      // Só limpa os creds quando REALMENTE inválido (logout ou badSession).
+      // Demais quedas (timeout, restart, rede) = reconecta mantendo a sessão.
       if (loggedOut || badSession) {
         await clearAuth();
         setTimeout(() => startSocket().catch((e) => log.error(e)), 4000);
+      } else if (conflict) {
+        // outro WhatsApp Web assumiu a sessão — espera mais p/ não brigar
+        setTimeout(() => startSocket().catch((e) => log.error(e)), 15000);
       } else {
-        setTimeout(() => startSocket().catch((e) => log.error(e)), 4000);
+        setTimeout(() => startSocket().catch((e) => log.error(e)), 5000);
       }
     }
   });
