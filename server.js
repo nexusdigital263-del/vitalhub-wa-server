@@ -20,7 +20,6 @@ import {
   makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
-  fetchLatestBaileysVersion,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import { rm, readdir } from "fs/promises";
@@ -127,15 +126,15 @@ async function saveIncoming(phone, text, tsMs) {
 // ============================================================================
 async function startSocket() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  const { version } = await fetchLatestBaileysVersion();
 
   sock = makeWASocket({
-    version,
     auth: state,
     printQRInTerminal: false,
     logger: pino({ level: "silent" }),
-    browser: ["VitalHub CRM", "Chrome", "1.0"],
+    browser: ["Ubuntu", "Chrome", "22.04.4"],
     markOnlineOnConnect: false,
+    syncFullHistory: false,
+    connectTimeoutMs: 60000,
   });
 
   sock.ev.on("creds.update", saveCreds);
@@ -164,9 +163,9 @@ async function startSocket() {
       // sessão inválida ou logout: apaga os creds e recomeça do zero (gera QR novo)
       if (loggedOut || badSession) {
         await clearAuth();
-        setTimeout(() => startSocket().catch((e) => log.error(e)), 1500);
+        setTimeout(() => startSocket().catch((e) => log.error(e)), 4000);
       } else {
-        setTimeout(() => startSocket().catch((e) => log.error(e)), 3000);
+        setTimeout(() => startSocket().catch((e) => log.error(e)), 4000);
       }
     }
   });
