@@ -23,6 +23,7 @@ import {
   fetchLatestBaileysVersion,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
+import { rm } from "fs/promises";
 
 // ---- Config (variáveis de ambiente) ----------------------------------------
 const PORT = process.env.PORT || 3000;
@@ -36,6 +37,12 @@ const log = pino({ level: "info" });
 const sb = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
   : null;
+
+// limpa a pasta de sessão (creds corrompidos / badSession / logout)
+async function clearAuth() {
+  try { await rm(AUTH_DIR, { recursive: true, force: true }); log.warn("🧹 sessão limpa (" + AUTH_DIR + ")"); }
+  catch (e) { log.error(e, "falha ao limpar sessão"); }
+}
 
 // ---- Estado da conexão ------------------------------------------------------
 let sock = null;
@@ -147,12 +154,15 @@ async function startSocket() {
       connState = "close";
       const code = new Boom(lastDisconnect?.error)?.output?.statusCode;
       const loggedOut = code === DisconnectReason.loggedOut;
-      log.warn(`conexão fechada (code ${code}) — ${loggedOut ? "deslogado, escaneie o QR de novo" : "reconectando…"}`);
-      if (!loggedOut) {
-        setTimeout(() => startSocket().catch((e) => log.error(e)), 3000);
-      } else {
-        qrDataUrl = null; // força novo QR no próximo start
+      const badSession = code === DisconnectReason.badSession || code === 500;
+      log.warn(`conexão fechada (code ${code}) — ${loggedOut ? "deslogado" : badSession ? "sessão inválida, limpando…" : "reconectando…"}`);
+      qrDataUrl = null;
+      // sessão inválida ou logout: apaga os creds e recomeça do zero (gera QR novo)
+      if (loggedOut || badSession) {
+        await clearAuth();
         setTimeout(() => startSocket().catch((e) => log.error(e)), 1500);
+      } else {
+        setTimeout(() => startSocket().catch((e) => log.error(e)), 3000);
       }
     }
   });
