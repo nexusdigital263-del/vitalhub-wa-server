@@ -20,6 +20,7 @@ import {
   makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
+  fetchLatestBaileysVersion,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import { rm, readdir } from "fs/promises";
@@ -126,8 +127,10 @@ async function saveIncoming(phone, text, tsMs) {
 // ============================================================================
 async function startSocket() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+  const { version } = await fetchLatestBaileysVersion();
 
   sock = makeWASocket({
+    version,
     auth: state,
     printQRInTerminal: false,
     logger: pino({ level: "silent" }),
