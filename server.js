@@ -23,7 +23,8 @@ import {
   fetchLatestBaileysVersion,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
-import { rm } from "fs/promises";
+import { rm, readdir } from "fs/promises";
+import { join } from "path";
 
 // ---- Config (variáveis de ambiente) ----------------------------------------
 const PORT = process.env.PORT || 3000;
@@ -38,10 +39,13 @@ const sb = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
   : null;
 
-// limpa a pasta de sessão (creds corrompidos / badSession / logout)
+// limpa o CONTEÚDO da pasta de sessão (não a pasta em si — é o mount do volume)
 async function clearAuth() {
-  try { await rm(AUTH_DIR, { recursive: true, force: true }); log.warn("🧹 sessão limpa (" + AUTH_DIR + ")"); }
-  catch (e) { log.error(e, "falha ao limpar sessão"); }
+  try {
+    const entries = await readdir(AUTH_DIR).catch(() => []);
+    await Promise.all(entries.map((name) => rm(join(AUTH_DIR, name), { recursive: true, force: true })));
+    log.warn("🧹 sessão limpa (" + entries.length + " itens em " + AUTH_DIR + ")");
+  } catch (e) { log.error(e, "falha ao limpar sessão"); }
 }
 
 // ---- Estado da conexão ------------------------------------------------------
