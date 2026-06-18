@@ -65,7 +65,8 @@ function toJid(phone) {
   return d + "@s.whatsapp.net";
 }
 function fromJid(jid) {
-  const d = digits((jid || "").split("@")[0]);
+  // remove o sufixo de dispositivo (ex: "5534992626219:93@s.whatsapp.net")
+  const d = digits((jid || "").split("@")[0].split(":")[0]);
   return d;
 }
 
@@ -111,7 +112,6 @@ async function saveIncoming(phone, text, tsMs) {
         responsavel: "",
         interacoes: [it],
         unread: 1,
-        origem: "whatsapp-inbound",
       };
       const { error: insErr } = await sb.from("leads").insert(novo);
       if (insErr) log.error(insErr, "erro criando lead inbound");
@@ -211,18 +211,34 @@ async function startSocket() {
 // ============================================================================
 //  Envio (com atraso anti-ban opcional)
 // ============================================================================
+// resolve o JID REAL no WhatsApp (corrige o 9º dígito automaticamente).
+// Tenta o número como veio e a variante com/sem o 9 após o DDD; usa o JID
+// que o WhatsApp confirma existir.
+async function resolveJid(phone) {
+  let d = digits(phone);
+  if (!d) return null;
+  if (d.length <= 11) d = "55" + d; // DDI Brasil
+  const candidates = [d];
+  // gera a variante alternando o 9º dígito (só BR: 55 + DDD + número)
+  if (/^55\d{2}/.test(d)) {
+    const ddi = d.slice(0, 2), ddd = d.slice(2, 4), resto = d.slice(4);
+    if (resto.length === 9 && resto[0] === "9") candidates.push(ddi + ddd + resto.slice(1)); // tira o 9
+    else if (resto.length === 8) candidates.push(ddi + ddd + "9" + resto);                  // põe o 9
+  }
+  for (const c of candidates) {
+    try {
+      const res = await sock.onWhatsApp(c + "@s.whatsapp.net");
+      const hit = Array.isArray(res) ? res.find((r) => r && r.exists) : null;
+      if (hit && hit.jid) return hit.jid; // JID canônico que o WhatsApp aceita
+    } catch (e) { /* tenta o próximo */ }
+  }
+  return null; // nenhuma variante existe no WhatsApp
+}
+
 async function sendText(phone, text) {
   if (connState !== "open" || !sock) throw new Error("WhatsApp não conectado — escaneie o QR em /qr");
-  const jid = toJid(phone);
-  if (!jid) throw new Error("Número inválido");
-  // confere se o número existe no WhatsApp
-  try {
-    const [res] = await sock.onWhatsApp(jid);
-    if (!res || !res.exists) throw new Error("Número não tem WhatsApp");
-  } catch (e) {
-    if (/não tem WhatsApp/.test(e.message)) throw e;
-    // se a checagem falhar por outro motivo, segue tentando enviar
-  }
+  const jid = await resolveJid(phone);
+  if (!jid) throw new Error("Número não tem WhatsApp (verifique DDD e o 9º dígito)");
   // respeita atraso mínimo entre envios
   const wait = MIN_DELAY_MS - (Date.now() - lastSendAt);
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
